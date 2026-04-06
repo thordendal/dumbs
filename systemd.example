@@ -1,0 +1,20 @@
+[Unit]
+Description=dumbs application server
+After=network.target postgresql.service
+
+[Service]
+User=dumbs
+Group=dumbs
+ExecStart=/usr/local/bin/dumbs -config /etc/dumbs/dumbs.yaml
+Restart=on-failure
+RestartSec=5
+
+# Graceful stop via SIGQUIT; systemd default SIGTERM will do a hard stop.
+KillSignal=SIGQUIT
+TimeoutStopSec=30
+
+# Working directory and data directory must be accessible to the user above.
+WorkingDirectory=/var/lib/dumbs
+
+[Install]
+WantedBy=multi-user.target

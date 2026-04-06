@@ -1,0 +1,28 @@
+---
+log:
+  # Log level: debug | info | warn | error
+  level: info
+
+  # Log format:
+  #   json  — one JSON object per line; parse with jq
+  #   plain — human-readable "TIME LEVEL message key=val"; parse with grep/awk
+  format: plain
+
+  # Log output:
+  #   stdout         — write to standard output (journald picks this up when run under systemd)
+  #   /path/to/file  — append to this file; set up logrotate to manage rotation
+  output: stdout
+
+app:
+  # Directory used by the app for runtime data.
+  # The process must have read+write access; chaos/datadir writes here.
+  # Default: /var/lib/dumbs
+  data_dir: /var/lib/dumbs
+
+  database:
+    # PostgreSQL connection string (libpq URI format).
+    # Leave empty to run without a database (readiness probe will always fail).
+    dsn: "postgres://dumbs:secret@localhost:5432/dumbs?sslmode=disable"
+
+  # TCP address (host:port) or Unix socket path to listen on.
+  listen: ":8080"
