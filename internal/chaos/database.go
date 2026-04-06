@@ -11,29 +11,34 @@ import (
 
 // runDatabase launches three sub-goroutines that abuse the database in
 // different instructive ways. All three run under the same context; cancelling
-// it terminates all of them.
+// it terminates all of them. Config is snapshotted at goroutine start; use
+// ApplyDatabase/PatchDatabase to change it (which stop+restarts the worker).
 //
-//   - rapidInserts: batch-inserts 1 000 rows as fast as possible — fills the
-//     table and spikes CPU/IO.
+//   - rapidInserts: batch-inserts rows as fast as possible — fills the table
+//     and spikes CPU/IO.
 //   - hangingTxns: opens transactions and then sleeps forever without committing
 //     — exhausts connection slots; visible in pg_stat_activity as
 //     "idle in transaction".
 //   - badQueries: sends queries referencing non-existent columns/tables —
 //     floods logs with ERROR lines; teaches log triage.
 func (m *Manager) runDatabase(ctx context.Context) {
+	m.mu.Lock()
+	cfg := m.cfgDatabase
+	m.mu.Unlock()
+
 	var wg sync.WaitGroup
 	wg.Add(3)
-	go func() { defer wg.Done(); m.rapidInserts(ctx) }()
-	go func() { defer wg.Done(); m.hangingTxns(ctx) }()
-	go func() { defer wg.Done(); m.badQueries(ctx) }()
+	go func() { defer wg.Done(); m.rapidInserts(ctx, cfg.InsertBatchSize) }()
+	go func() { defer wg.Done(); m.hangingTxns(ctx, cfg.HangingTxnIntervalMs) }()
+	go func() { defer wg.Done(); m.badQueries(ctx, cfg.BadQueryIntervalMs) }()
 	wg.Wait()
 }
 
-// rapidInserts inserts 1 000-row batches into events as quickly as possible.
-func (m *Manager) rapidInserts(ctx context.Context) {
+// rapidInserts inserts batchSize-row batches into events as quickly as possible.
+func (m *Manager) rapidInserts(ctx context.Context, batchSize int) {
 	pool := m.db.Pool()
 	for ctx.Err() == nil {
-		rows := make([][]any, 1000)
+		rows := make([][]any, batchSize)
 		for i := range rows {
 			rows[i] = []any{randomPayload(64)}
 		}
@@ -53,7 +58,7 @@ func (m *Manager) rapidInserts(ctx context.Context) {
 // hangingTxns opens transactions, runs a SELECT, then sleeps forever without
 // committing. Visible as "idle in transaction" in pg_stat_activity.
 // The lesson: idle_in_transaction_session_timeout and connection-pool exhaustion.
-func (m *Manager) hangingTxns(ctx context.Context) {
+func (m *Manager) hangingTxns(ctx context.Context, intervalMs int) {
 	pool := m.db.Pool()
 	var txMu sync.Mutex
 	var hanging []context.CancelFunc
@@ -67,8 +72,7 @@ func (m *Manager) hangingTxns(ctx context.Context) {
 	}()
 
 	for ctx.Err() == nil {
-		// Spawn a new hanging transaction every 2 seconds.
-		time.Sleep(2 * time.Second)
+		time.Sleep(time.Duration(intervalMs) * time.Millisecond)
 
 		txCtx, txCancel := context.WithCancel(context.Background())
 		go func() {
@@ -94,7 +98,7 @@ func (m *Manager) hangingTxns(ctx context.Context) {
 // badQueries runs SQL that references non-existent identifiers, producing loud
 // errors. The lesson: ERROR log triaging, and why you don't expose raw DB errors
 // to end users.
-func (m *Manager) badQueries(ctx context.Context) {
+func (m *Manager) badQueries(ctx context.Context, intervalMs int) {
 	pool := m.db.Pool()
 	badSQL := []string{
 		"SELECT nonexistent_column FROM events",
@@ -103,7 +107,7 @@ func (m *Manager) badQueries(ctx context.Context) {
 		"UPDATE events SET ghost_column = 'boo' WHERE id = 1",
 	}
 
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
 	defer ticker.Stop()
 
 	i := 0

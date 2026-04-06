@@ -23,7 +23,7 @@ the database chaos will work), but most exercises require one.
 ## Building
 
 ```sh
-git clone <repo-url>
+git clone https://github.com/thordendal/dumbs
 cd dumbs
 go build -o dumbs .
 ```
@@ -43,6 +43,8 @@ CREATE DATABASE dumbs OWNER dumbs;
 ```
 
 The app will create the required tables automatically on startup.
+
+You can also use supplied [docker-compose.yaml](docker-compose.yaml)
 
 ---
 

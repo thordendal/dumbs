@@ -10,22 +10,25 @@ import (
 	"github.com/thor/dumbs/internal/logger"
 )
 
-const (
-	chaosSubdir = "chaos"
-	fileSize    = 10 * 1024 * 1024 // 10 MiB per file
-)
+const chaosSubdir = "chaos"
 
-// runDatadir creates sequential 10 MiB binary files filled with random data
-// inside <data_dir>/chaos/ as fast as possible, and never deletes them.
+// runDatadir creates sequential binary files filled with random data inside
+// <data_dir>/chaos/ as fast as possible, and never deletes them.
+// File size is read from cfgDatadir at goroutine start; use ApplyDatadir/
+// PatchDatadir to change it (which stop+restarts the worker).
 // The lesson: disks fill up. Monitor with `df -h`.
 func (m *Manager) runDatadir(ctx context.Context) {
+	m.mu.Lock()
+	cfg := m.cfgDatadir
+	m.mu.Unlock()
+
 	dir := filepath.Join(m.cfg.Get().App.DataDir, chaosSubdir)
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		logger.Get().Error().Err(err).Str("dir", dir).Msg("chaos/datadir: mkdir failed")
 		return
 	}
 
-	buf := make([]byte, fileSize)
+	buf := make([]byte, cfg.FileSizeBytes)
 	seq := 0
 	for {
 		if ctx.Err() != nil {
@@ -49,7 +52,7 @@ func (m *Manager) runDatadir(ctx context.Context) {
 			return
 		}
 		f.Close()
-		logger.Get().Warn().Str("file", name).Int("bytes", fileSize).Msg("chaos/datadir: file written")
+		logger.Get().Warn().Str("file", name).Int("bytes", cfg.FileSizeBytes).Msg("chaos/datadir: file written")
 		seq++
 	}
 }

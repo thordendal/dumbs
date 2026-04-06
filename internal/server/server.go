@@ -133,15 +133,13 @@ func (s *Server) routes() {
 	s.e.GET("/metrics", s.handleMetrics)
 	s.e.POST("/config/reload", s.handleConfigReload)
 
-	s.e.POST("/chaos/logs/start", s.handleChaosStart("logs"))
-	s.e.POST("/chaos/logs/stop", s.handleChaosStop("logs"))
-	s.e.POST("/chaos/datadir/start", s.handleChaosStart("datadir"))
-	s.e.POST("/chaos/datadir/stop", s.handleChaosStop("datadir"))
-	s.e.POST("/chaos/database/start", s.handleChaosStart("database"))
-	s.e.POST("/chaos/database/stop", s.handleChaosStop("database"))
-	s.e.POST("/chaos/memory/start", s.handleChaosStart("memory"))
-	s.e.POST("/chaos/memory/stop", s.handleChaosStop("memory"))
-	s.e.GET("/chaos/status", s.handleChaosStatus)
+	s.e.GET("/chaos", s.handleChaosList)
+	s.e.DELETE("/chaos", s.handleChaosDeleteAll)
+	s.e.GET("/chaos/:kind", s.handleChaosGet)
+	s.e.PUT("/chaos/:kind", s.handleChaosPut)
+	s.e.PATCH("/chaos/:kind", s.handleChaosPatch)
+	s.e.POST("/chaos/:kind", s.handleChaosPost)
+	s.e.DELETE("/chaos/:kind", s.handleChaosDel)
 
 	s.e.POST("/database/reset", s.handleDatabaseReset)
 }

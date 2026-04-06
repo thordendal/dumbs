@@ -1,8 +1,9 @@
 // Package chaos implements the ChaosManager and all chaos worker goroutines.
 //
-// Each worker is started and stopped via context cancellation. The Manager
-// holds a *worker value per chaos type; nil means the worker is not running.
-// All public methods on Manager are safe for concurrent use.
+// Each worker is a REST resource at /chaos/:kind. The resource document holds
+// both configuration and active state. Workers are started and stopped via
+// context cancellation; the Manager holds a *worker per chaos type (nil = not
+// running). All exported methods on Manager are safe for concurrent use.
 package chaos
 
 import (
@@ -15,21 +16,18 @@ import (
 	"github.com/thor/dumbs/internal/metrics"
 )
 
-// errNoDB is returned when database chaos is requested but no DB is configured.
-var errNoDB = errors.New("database not configured; set app.database.dsn in config")
+// Sentinel errors returned by Manager methods.
+var (
+	// ErrNoDB is returned when database chaos is requested but no DB is configured.
+	ErrNoDB = errors.New("database not configured; set app.database.dsn in config")
+	// ErrAlreadyActive is returned by Activate* when the worker is already running.
+	ErrAlreadyActive = errors.New("worker is already active")
+)
 
 // worker tracks the lifecycle of a single chaos goroutine.
 type worker struct {
 	cancel context.CancelFunc
 	done   chan struct{}
-}
-
-// Status is returned by Manager.Status and serialised to JSON for GET /chaos/status.
-type Status struct {
-	Logs     bool `json:"logs"`
-	Datadir  bool `json:"datadir"`
-	Database bool `json:"database"`
-	Memory   bool `json:"memory"`
 }
 
 // Manager owns all chaos workers and the resources they share.
@@ -38,10 +36,12 @@ type Manager struct {
 	db      *database.DB
 	metrics *metrics.Metrics
 
-	// leak holds the memory accumulated by the memory-leak worker so that it
-	// is reachable (and therefore not collected) while the worker runs.
-	mu   sync.Mutex
-	leak [][]byte
+	mu          sync.Mutex
+	leak        [][]byte // memory leak accumulator; held here to prevent GC
+	cfgLogs     LogsConfig
+	cfgDatadir  DatadirConfig
+	cfgDatabase DatabaseChaosConfig
+	cfgMemory   MemoryConfig
 
 	wLogs   *worker
 	wData   *worker
@@ -49,10 +49,19 @@ type Manager struct {
 	wMemory *worker
 }
 
-// NewManager constructs a Manager. db may be nil; calling StartDatabase will
-// return an error in that case.
+// NewManager constructs a Manager with all workers initialised to their default
+// configs and not running. db may be nil; ApplyDatabase/ActivateDatabase will
+// return ErrNoDB in that case.
 func NewManager(cfg *config.Loader, db *database.DB, m *metrics.Metrics) *Manager {
-	return &Manager{cfg: cfg, db: db, metrics: m}
+	return &Manager{
+		cfg:         cfg,
+		db:          db,
+		metrics:     m,
+		cfgLogs:     defaultLogsConfig(),
+		cfgDatadir:  defaultDatadirConfig(),
+		cfgDatabase: defaultDatabaseChaosConfig(),
+		cfgMemory:   defaultMemoryConfig(),
+	}
 }
 
 // startWorker launches fn in a new goroutine under a fresh cancellable context.
@@ -89,105 +98,304 @@ func (m *Manager) stopWorker(slot **worker) bool {
 	return true
 }
 
-// --- Logs ---
+// ---- Logs ----------------------------------------------------------------
 
-func (m *Manager) StartLogs() bool {
-	ok := m.startWorker(&m.wLogs, m.runLogs)
-	if ok {
-		m.metrics.ChaosLogsActive.Set(1)
-	}
-	return ok
+// GetLogs returns the current logs config with the live active state.
+func (m *Manager) GetLogs() LogsConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg := m.cfgLogs
+	cfg.Active = m.wLogs != nil
+	return cfg
 }
 
-func (m *Manager) StopLogs() bool {
-	ok := m.stopWorker(&m.wLogs)
-	if ok {
+// ApplyLogs replaces the stored logs config and starts/stops/restarts the
+// worker according to cfg.Active. Config change while running = stop+restart.
+func (m *Manager) ApplyLogs(cfg LogsConfig) (LogsConfig, error) {
+	cfg.Kind = "logs"
+	if err := validateLogsConfig(cfg); err != nil {
+		return m.GetLogs(), err
+	}
+	if stopped := m.stopWorker(&m.wLogs); stopped {
 		m.metrics.ChaosLogsActive.Set(0)
 	}
-	return ok
-}
-
-// --- Data dir ---
-
-func (m *Manager) StartDatadir() bool {
-	ok := m.startWorker(&m.wData, m.runDatadir)
-	if ok {
-		m.metrics.ChaosDatdirActive.Set(1)
+	m.mu.Lock()
+	m.cfgLogs = cfg
+	m.mu.Unlock()
+	if cfg.Active {
+		m.startWorker(&m.wLogs, m.runLogs)
+		m.metrics.ChaosLogsActive.Set(1)
 	}
-	return ok
+	return m.GetLogs(), nil
 }
 
-func (m *Manager) StopDatadir() bool {
-	ok := m.stopWorker(&m.wData)
-	if ok {
+// PatchLogs applies a partial update to the logs config.
+func (m *Manager) PatchLogs(patch LogsConfigPatch) (LogsConfig, error) {
+	m.mu.Lock()
+	current := m.cfgLogs
+	current.Active = m.wLogs != nil
+	merged := patch.apply(current)
+	m.mu.Unlock()
+	return m.ApplyLogs(merged)
+}
+
+// ActivateLogs starts the logs worker with the current config.
+// Returns ErrAlreadyActive if the worker is already running.
+func (m *Manager) ActivateLogs() (LogsConfig, error) {
+	if !m.startWorker(&m.wLogs, m.runLogs) {
+		return m.GetLogs(), ErrAlreadyActive
+	}
+	m.metrics.ChaosLogsActive.Set(1)
+	return m.GetLogs(), nil
+}
+
+// ResetLogs stops the logs worker and resets config to defaults.
+func (m *Manager) ResetLogs() LogsConfig {
+	if m.stopWorker(&m.wLogs) {
+		m.metrics.ChaosLogsActive.Set(0)
+	}
+	m.mu.Lock()
+	m.cfgLogs = defaultLogsConfig()
+	m.mu.Unlock()
+	return m.GetLogs()
+}
+
+// ---- Datadir -------------------------------------------------------------
+
+// GetDatadir returns the current datadir config with the live active state.
+func (m *Manager) GetDatadir() DatadirConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg := m.cfgDatadir
+	cfg.Active = m.wData != nil
+	return cfg
+}
+
+// ApplyDatadir replaces the stored datadir config and starts/stops/restarts
+// the worker according to cfg.Active.
+func (m *Manager) ApplyDatadir(cfg DatadirConfig) (DatadirConfig, error) {
+	cfg.Kind = "datadir"
+	if err := validateDatadirConfig(cfg); err != nil {
+		return m.GetDatadir(), err
+	}
+	if stopped := m.stopWorker(&m.wData); stopped {
 		m.metrics.ChaosDatdirActive.Set(0)
 	}
-	return ok
+	m.mu.Lock()
+	m.cfgDatadir = cfg
+	m.mu.Unlock()
+	if cfg.Active {
+		m.startWorker(&m.wData, m.runDatadir)
+		m.metrics.ChaosDatdirActive.Set(1)
+	}
+	return m.GetDatadir(), nil
 }
 
-// --- Database ---
-
-// StartDatabase starts DB chaos. Returns (false, nil) if already running,
-// (false, err) if DB is not configured.
-func (m *Manager) StartDatabase() (bool, error) {
-	if m.db == nil {
-		return false, errNoDB
-	}
-	ok := m.startWorker(&m.wDB, m.runDatabase)
-	if ok {
-		m.metrics.ChaosDatabaseActive.Set(1)
-	}
-	return ok, nil
+// PatchDatadir applies a partial update to the datadir config.
+func (m *Manager) PatchDatadir(patch DatadirConfigPatch) (DatadirConfig, error) {
+	m.mu.Lock()
+	current := m.cfgDatadir
+	current.Active = m.wData != nil
+	merged := patch.apply(current)
+	m.mu.Unlock()
+	return m.ApplyDatadir(merged)
 }
 
-func (m *Manager) StopDatabase() bool {
-	ok := m.stopWorker(&m.wDB)
-	if ok {
+// ActivateDatadir starts the datadir worker with the current config.
+// Returns ErrAlreadyActive if the worker is already running.
+func (m *Manager) ActivateDatadir() (DatadirConfig, error) {
+	if !m.startWorker(&m.wData, m.runDatadir) {
+		return m.GetDatadir(), ErrAlreadyActive
+	}
+	m.metrics.ChaosDatdirActive.Set(1)
+	return m.GetDatadir(), nil
+}
+
+// ResetDatadir stops the datadir worker and resets config to defaults.
+func (m *Manager) ResetDatadir() DatadirConfig {
+	if m.stopWorker(&m.wData) {
+		m.metrics.ChaosDatdirActive.Set(0)
+	}
+	m.mu.Lock()
+	m.cfgDatadir = defaultDatadirConfig()
+	m.mu.Unlock()
+	return m.GetDatadir()
+}
+
+// ---- Database ------------------------------------------------------------
+
+// GetDatabase returns the current database chaos config with the live active state.
+func (m *Manager) GetDatabase() DatabaseChaosConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg := m.cfgDatabase
+	cfg.Active = m.wDB != nil
+	return cfg
+}
+
+// ApplyDatabase replaces the stored database chaos config and starts/stops/restarts
+// the worker according to cfg.Active. Returns ErrNoDB if active=true and no DB.
+func (m *Manager) ApplyDatabase(cfg DatabaseChaosConfig) (DatabaseChaosConfig, error) {
+	cfg.Kind = "database"
+	if cfg.Active && m.db == nil {
+		return m.GetDatabase(), ErrNoDB
+	}
+	if err := validateDatabaseChaosConfig(cfg); err != nil {
+		return m.GetDatabase(), err
+	}
+	if stopped := m.stopWorker(&m.wDB); stopped {
 		m.metrics.ChaosDatabaseActive.Set(0)
 	}
-	return ok
-}
-
-// --- Memory ---
-
-func (m *Manager) StartMemory() bool {
-	ok := m.startWorker(&m.wMemory, m.runMemory)
-	if ok {
-		m.metrics.ChaosMemoryActive.Set(1)
+	m.mu.Lock()
+	m.cfgDatabase = cfg
+	m.mu.Unlock()
+	if cfg.Active {
+		m.startWorker(&m.wDB, m.runDatabase)
+		m.metrics.ChaosDatabaseActive.Set(1)
 	}
-	return ok
+	return m.GetDatabase(), nil
 }
 
-func (m *Manager) StopMemory() bool {
-	ok := m.stopWorker(&m.wMemory)
-	if ok {
+// PatchDatabase applies a partial update to the database chaos config.
+func (m *Manager) PatchDatabase(patch DatabaseChaosConfigPatch) (DatabaseChaosConfig, error) {
+	m.mu.Lock()
+	current := m.cfgDatabase
+	current.Active = m.wDB != nil
+	merged := patch.apply(current)
+	m.mu.Unlock()
+	return m.ApplyDatabase(merged)
+}
+
+// ActivateDatabase starts the database chaos worker with the current config.
+// Returns ErrNoDB if no database is configured, ErrAlreadyActive if running.
+func (m *Manager) ActivateDatabase() (DatabaseChaosConfig, error) {
+	if m.db == nil {
+		return m.GetDatabase(), ErrNoDB
+	}
+	if !m.startWorker(&m.wDB, m.runDatabase) {
+		return m.GetDatabase(), ErrAlreadyActive
+	}
+	m.metrics.ChaosDatabaseActive.Set(1)
+	return m.GetDatabase(), nil
+}
+
+// ResetDatabase stops the database chaos worker and resets config to defaults.
+func (m *Manager) ResetDatabase() DatabaseChaosConfig {
+	if m.stopWorker(&m.wDB) {
+		m.metrics.ChaosDatabaseActive.Set(0)
+	}
+	m.mu.Lock()
+	m.cfgDatabase = defaultDatabaseChaosConfig()
+	m.mu.Unlock()
+	return m.GetDatabase()
+}
+
+// ---- Memory --------------------------------------------------------------
+
+// GetMemory returns the current memory config with the live active state.
+func (m *Manager) GetMemory() MemoryConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg := m.cfgMemory
+	cfg.Active = m.wMemory != nil
+	return cfg
+}
+
+// ApplyMemory replaces the stored memory config and starts/stops/restarts the
+// worker according to cfg.Active. Stopping also nils the leak slice so the GC
+// can eventually reclaim the allocated memory.
+func (m *Manager) ApplyMemory(cfg MemoryConfig) (MemoryConfig, error) {
+	cfg.Kind = "memory"
+	if err := validateMemoryConfig(cfg); err != nil {
+		return m.GetMemory(), err
+	}
+	if stopped := m.stopWorker(&m.wMemory); stopped {
 		m.metrics.ChaosMemoryActive.Set(0)
-		// Release the leak slice so the GC can eventually reclaim it.
 		m.mu.Lock()
 		m.leak = nil
 		m.mu.Unlock()
 	}
-	return ok
-}
-
-// --- Global ---
-
-// StopAll stops every active chaos worker and blocks until all have exited.
-func (m *Manager) StopAll() {
-	m.StopLogs()
-	m.StopDatadir()
-	m.StopDatabase()
-	m.StopMemory()
-}
-
-// Status returns a point-in-time snapshot of which workers are running.
-func (m *Manager) Status() Status {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return Status{
-		Logs:     m.wLogs != nil,
-		Datadir:  m.wData != nil,
-		Database: m.wDB != nil,
-		Memory:   m.wMemory != nil,
+	m.cfgMemory = cfg
+	m.mu.Unlock()
+	if cfg.Active {
+		m.startWorker(&m.wMemory, m.runMemory)
+		m.metrics.ChaosMemoryActive.Set(1)
+	}
+	return m.GetMemory(), nil
+}
+
+// PatchMemory applies a partial update to the memory config.
+func (m *Manager) PatchMemory(patch MemoryConfigPatch) (MemoryConfig, error) {
+	m.mu.Lock()
+	current := m.cfgMemory
+	current.Active = m.wMemory != nil
+	merged := patch.apply(current)
+	m.mu.Unlock()
+	return m.ApplyMemory(merged)
+}
+
+// ActivateMemory starts the memory leak worker with the current config.
+// Returns ErrAlreadyActive if the worker is already running.
+func (m *Manager) ActivateMemory() (MemoryConfig, error) {
+	if !m.startWorker(&m.wMemory, m.runMemory) {
+		return m.GetMemory(), ErrAlreadyActive
+	}
+	m.metrics.ChaosMemoryActive.Set(1)
+	return m.GetMemory(), nil
+}
+
+// ResetMemory stops the memory leak worker and resets config to defaults.
+func (m *Manager) ResetMemory() MemoryConfig {
+	if m.stopWorker(&m.wMemory) {
+		m.metrics.ChaosMemoryActive.Set(0)
+		m.mu.Lock()
+		m.leak = nil
+		m.mu.Unlock()
+	}
+	m.mu.Lock()
+	m.cfgMemory = defaultMemoryConfig()
+	m.mu.Unlock()
+	return m.GetMemory()
+}
+
+// ---- Collection-level ----------------------------------------------------
+
+// GetAll returns all four worker resource documents as a slice.
+func (m *Manager) GetAll() []any {
+	return []any{
+		m.GetLogs(),
+		m.GetDatadir(),
+		m.GetDatabase(),
+		m.GetMemory(),
+	}
+}
+
+// ResetAll stops all workers and resets all configs to defaults.
+// Used by DELETE /chaos.
+func (m *Manager) ResetAll() {
+	m.ResetLogs()
+	m.ResetDatadir()
+	m.ResetDatabase()
+	m.ResetMemory()
+}
+
+// StopAll stops every active chaos worker without resetting config.
+// Used by signal handling (SIGUSR1 and SIGQUIT).
+func (m *Manager) StopAll() {
+	if m.stopWorker(&m.wLogs) {
+		m.metrics.ChaosLogsActive.Set(0)
+	}
+	if m.stopWorker(&m.wData) {
+		m.metrics.ChaosDatdirActive.Set(0)
+	}
+	if m.stopWorker(&m.wDB) {
+		m.metrics.ChaosDatabaseActive.Set(0)
+	}
+	if m.stopWorker(&m.wMemory) {
+		m.metrics.ChaosMemoryActive.Set(0)
+		m.mu.Lock()
+		m.leak = nil
+		m.mu.Unlock()
 	}
 }

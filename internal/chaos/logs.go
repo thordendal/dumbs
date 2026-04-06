@@ -10,14 +10,16 @@ import (
 	"github.com/thor/dumbs/internal/logger"
 )
 
-// runLogs floods the log output with ~100 MB/min of structured entries.
-//
-// Pre-generated hex chunks are rotated to avoid hammering crypto/rand on every
-// line. Each log line is ~1 100 bytes (two 1 024-char hex fields + JSON overhead)
-// which at one line per 660 µs gives ~1.67 MB/s ≈ 100 MB/min.
+// runLogs floods the log output with structured entries at the rate and payload
+// size configured in cfgLogs. Config is snapshotted at goroutine start; use
+// ApplyLogs/PatchLogs to change it (which stop+restarts the worker).
 func (m *Manager) runLogs(ctx context.Context) {
+	m.mu.Lock()
+	cfg := m.cfgLogs
+	m.mu.Unlock()
+
 	const chunkCount = 64
-	const rawSize = 512 // 512 bytes → 1024-char hex string
+	rawSize := cfg.PayloadBytes
 
 	chunks := make([]string, chunkCount)
 	for i := range chunks {
@@ -26,7 +28,8 @@ func (m *Manager) runLogs(ctx context.Context) {
 		chunks[i] = hex.EncodeToString(raw)
 	}
 
-	ticker := time.NewTicker(660 * time.Microsecond)
+	interval := time.Second / time.Duration(cfg.RatePerSec)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	i := 0
