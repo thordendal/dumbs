@@ -10,12 +10,12 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/thor/dumbs/internal/chaos"
-	"github.com/thor/dumbs/internal/config"
-	"github.com/thor/dumbs/internal/database"
-	"github.com/thor/dumbs/internal/health"
-	"github.com/thor/dumbs/internal/logger"
-	"github.com/thor/dumbs/internal/metrics"
+	"github.com/thordendal/dumbs/internal/chaos"
+	"github.com/thordendal/dumbs/internal/config"
+	"github.com/thordendal/dumbs/internal/database"
+	"github.com/thordendal/dumbs/internal/health"
+	"github.com/thordendal/dumbs/internal/logger"
+	"github.com/thordendal/dumbs/internal/metrics"
 )
 
 // Server wraps an Echo instance and its dependencies.

@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"time"
 
-	"github.com/thor/dumbs/internal/logger"
+	"github.com/thordendal/dumbs/internal/logger"
 )
 
 // runMemory appends random-byte chunks to the Manager's leak slice on each tick,

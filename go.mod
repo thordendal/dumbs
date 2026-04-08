@@ -1,4 +1,4 @@
-module github.com/thor/dumbs
+module github.com/thordendal/dumbs
 
 go 1.26.1
 

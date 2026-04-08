@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thor/dumbs/internal/logger"
+	"github.com/thordendal/dumbs/internal/logger"
 )
 
 // runDatabase launches three sub-goroutines that abuse the database in

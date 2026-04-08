@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/thor/dumbs/internal/logger"
+	"github.com/thordendal/dumbs/internal/logger"
 )
 
 const chaosSubdir = "chaos"

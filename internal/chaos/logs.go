@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/thor/dumbs/internal/logger"
+	"github.com/thordendal/dumbs/internal/logger"
 )
 
 // runLogs floods the log output with structured entries at the rate and payload

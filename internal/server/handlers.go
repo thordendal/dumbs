@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/thor/dumbs/internal/chaos"
-	"github.com/thor/dumbs/internal/logger"
+	"github.com/thordendal/dumbs/internal/chaos"
+	"github.com/thordendal/dumbs/internal/logger"
 )
 
 // handleRoot is the trivial liveness-visible endpoint: GET / → 200 "foobar".

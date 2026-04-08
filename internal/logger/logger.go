@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/thor/dumbs/internal/config"
+	"github.com/thordendal/dumbs/internal/config"
 )
 
 var (

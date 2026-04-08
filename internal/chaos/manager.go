@@ -11,9 +11,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/thor/dumbs/internal/config"
-	"github.com/thor/dumbs/internal/database"
-	"github.com/thor/dumbs/internal/metrics"
+	"github.com/thordendal/dumbs/internal/config"
+	"github.com/thordendal/dumbs/internal/database"
+	"github.com/thordendal/dumbs/internal/metrics"
 )
 
 // Sentinel errors returned by Manager methods.

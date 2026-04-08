@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/thor/dumbs/internal/database"
+	"github.com/thordendal/dumbs/internal/database"
 )
 
 // Health evaluates liveness and readiness probes.
