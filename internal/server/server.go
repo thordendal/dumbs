@@ -127,7 +127,12 @@ func httpErrorHandler(err error, c echo.Context) {
 }
 
 func (s *Server) routes() {
-	s.e.GET("/", handleRoot)
+	s.e.GET("/", s.handleUIIndex)
+	s.e.GET("/workers/:kind", s.handleUIWorker)
+	s.e.POST("/workers/:kind/stop", s.handleUIWorkerStop)
+	s.e.POST("/workers/:kind/start", s.handleUIWorkerStart)
+	s.e.POST("/workers/:kind/reset-db", s.handleUIWorkerResetDB)
+
 	s.e.GET("/health/live", s.handleLive)
 	s.e.GET("/health/ready", s.handleReady)
 	s.e.GET("/metrics", s.handleMetrics)

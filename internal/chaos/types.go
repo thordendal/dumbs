@@ -49,16 +49,18 @@ type DatadirConfig struct {
 	Kind          string `json:"kind"`
 	Active        bool   `json:"active"`
 	FileSizeBytes int    `json:"file_size_bytes"` // bytes per file (default 10 MiB)
+	IntervalMs    int    `json:"interval_ms"`     // ms between files; 0 = write as fast as possible
 }
 
 // DatadirConfigPatch is the PATCH request body; nil fields are left unchanged.
 type DatadirConfigPatch struct {
 	Active        *bool `json:"active"`
 	FileSizeBytes *int  `json:"file_size_bytes"`
+	IntervalMs    *int  `json:"interval_ms"`
 }
 
 func defaultDatadirConfig() DatadirConfig {
-	return DatadirConfig{Kind: "datadir", FileSizeBytes: 10 * 1024 * 1024}
+	return DatadirConfig{Kind: "datadir", FileSizeBytes: 10 * 1024 * 1024, IntervalMs: 0}
 }
 
 func (p DatadirConfigPatch) apply(c DatadirConfig) DatadirConfig {
@@ -68,12 +70,18 @@ func (p DatadirConfigPatch) apply(c DatadirConfig) DatadirConfig {
 	if p.FileSizeBytes != nil {
 		c.FileSizeBytes = *p.FileSizeBytes
 	}
+	if p.IntervalMs != nil {
+		c.IntervalMs = *p.IntervalMs
+	}
 	return c
 }
 
 func validateDatadirConfig(c DatadirConfig) error {
 	if c.FileSizeBytes <= 0 {
 		return fmt.Errorf("file_size_bytes must be positive")
+	}
+	if c.IntervalMs < 0 {
+		return fmt.Errorf("interval_ms must be non-negative")
 	}
 	return nil
 }

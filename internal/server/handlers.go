@@ -11,11 +11,6 @@ import (
 	"github.com/thordendal/dumbs/internal/logger"
 )
 
-// handleRoot is the trivial liveness-visible endpoint: GET / → 200 "foobar".
-func handleRoot(c echo.Context) error {
-	return c.String(http.StatusOK, "foobar\n")
-}
-
 // handleLive is the liveness probe. Always 200 while the process is running.
 // (Liveness cannot fail by design — if the handler runs, the process is alive.)
 func (s *Server) handleLive(c echo.Context) error {

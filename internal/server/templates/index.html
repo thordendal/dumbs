@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>dumbs</title>
+  <style>
+    body { font-family: monospace; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: .5rem 1rem; text-align: left; }
+    th { background: #eee; }
+    .running { color: green; font-weight: bold; }
+    .stopped { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>dumbs — chaos workers</h1>
+  <table>
+    <thead><tr><th>Worker</th><th>Status</th></tr></thead>
+    <tbody>
+    {{range .}}
+    <tr>
+      <td><a href="/workers/{{.Kind}}">{{.Kind}}</a></td>
+      <td>{{if .Active}}<span class="running">running</span>{{else}}<span class="stopped">stopped</span>{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+</body>
+</html>

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/thordendal/dumbs/internal/logger"
 )
@@ -13,9 +14,10 @@ import (
 const chaosSubdir = "chaos"
 
 // runDatadir creates sequential binary files filled with random data inside
-// <data_dir>/chaos/ as fast as possible, and never deletes them.
-// File size is read from cfgDatadir at goroutine start; use ApplyDatadir/
-// PatchDatadir to change it (which stop+restarts the worker).
+// <data_dir>/chaos/ and never deletes them.
+// File size and inter-file delay are read from cfgDatadir at goroutine start;
+// use ApplyDatadir/PatchDatadir to change them (which stop+restarts the worker).
+// Set interval_ms=0 to write as fast as possible.
 // The lesson: disks fill up. Monitor with `df -h`.
 func (m *Manager) runDatadir(ctx context.Context) {
 	m.mu.Lock()
@@ -54,5 +56,13 @@ func (m *Manager) runDatadir(ctx context.Context) {
 		f.Close()
 		logger.Get().Warn().Str("file", name).Int("bytes", cfg.FileSizeBytes).Msg("chaos/datadir: file written")
 		seq++
+
+		if cfg.IntervalMs > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Duration(cfg.IntervalMs) * time.Millisecond):
+			}
+		}
 	}
 }
