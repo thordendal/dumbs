@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>dumbs — {{.Kind}}</title>
+  <style>
+    body { font-family: monospace; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    nav { margin-bottom: 1rem; }
+    .running { color: green; font-weight: bold; }
+    .stopped { color: #888; font-weight: bold; }
+    .flash-error { color: red; border: 1px solid red; padding: .5rem; margin: .75rem 0; }
+    label { display: block; margin: .6rem 0; }
+    input[type=number] { width: 10rem; font-family: monospace; }
+    .stop-btn {
+      font-size: 1.5rem; padding: .5rem 2rem;
+      background: #c0392b; color: white; border: none;
+      cursor: pointer; border-radius: 4px; margin-top: .5rem;
+    }
+    .stop-btn:hover { background: #a93226; }
+    .start-btn {
+      font-size: 1.1rem; padding: .4rem 1.8rem;
+      background: #27ae60; color: white; border: none;
+      cursor: pointer; border-radius: 4px; margin-top: .5rem;
+    }
+    .start-btn:hover { background: #1e8449; }
+    .reset-btn {
+      font-size: 1rem; padding: .4rem 1.5rem;
+      background: #e67e22; color: white; border: none;
+      cursor: pointer; border-radius: 4px; margin-top: 1rem;
+    }
+    .reset-btn:hover { background: #ca6f1e; }
+  </style>
+</head>
+<body>
+  <nav><a href="/">← all workers</a></nav>
+  <h1>{{.Kind}}</h1>
+  <p>Status: {{if .Active}}<span class="running">running</span>{{else}}<span class="stopped">stopped</span>{{end}}</p>
+  {{if .Flash}}<p class="flash-error">{{.Flash}}</p>{{end}}
+
+  {{if .Active}}
+  <form method="POST" action="/workers/{{.Kind}}/stop">
+    <button type="submit" class="stop-btn">STOP</button>
+  </form>
+  {{if eq .Kind "database"}}
+  <form method="POST" action="/workers/{{.Kind}}/reset-db" style="margin-top:1.5rem">
+    <button type="submit" class="reset-btn">Reset Database Schema</button>
+  </form>
+  {{end}}
+
+  {{else}}
+
+  {{if eq .Kind "logs"}}
+  <form method="POST" action="/workers/{{.Kind}}/start">
+    <label>Rate per second: <input type="number" name="rate_per_sec" value="{{.RatePerSec}}" min="1" required></label>
+    <label>Payload bytes: <input type="number" name="payload_bytes" value="{{.PayloadBytes}}" min="1" required></label>
+    <button type="submit" class="start-btn">Start</button>
+  </form>
+  {{end}}
+
+  {{if eq .Kind "datadir"}}
+  <form method="POST" action="/workers/{{.Kind}}/start">
+    <label>File size bytes: <input type="number" name="file_size_bytes" value="{{.FileSizeBytes}}" min="1" required></label>
+    <label>Interval ms (0 = as fast as possible): <input type="number" name="interval_ms" value="{{.IntervalMs}}" min="0" required></label>
+    <button type="submit" class="start-btn">Start</button>
+  </form>
+  {{end}}
+
+  {{if eq .Kind "database"}}
+  <form method="POST" action="/workers/{{.Kind}}/start">
+    <label>Insert batch size: <input type="number" name="insert_batch_size" value="{{.InsertBatchSize}}" min="1" required></label>
+    <label>Bad query interval (ms): <input type="number" name="bad_query_interval_ms" value="{{.BadQueryIntervalMs}}" min="1" required></label>
+    <label>Hanging txn interval (ms): <input type="number" name="hanging_txn_interval_ms" value="{{.HangingTxnIntervalMs}}" min="1" required></label>
+    <button type="submit" class="start-btn">Start</button>
+  </form>
+  <form method="POST" action="/workers/{{.Kind}}/reset-db" style="margin-top:1.5rem">
+    <button type="submit" class="reset-btn">Reset Database Schema</button>
+  </form>
+  {{end}}
+
+  {{if eq .Kind "memory"}}
+  <form method="POST" action="/workers/{{.Kind}}/start">
+    <label>Chunk size bytes: <input type="number" name="chunk_size_bytes" value="{{.ChunkSizeBytes}}" min="1" required></label>
+    <label>Interval (ms): <input type="number" name="interval_ms" value="{{.IntervalMs}}" min="1" required></label>
+    <button type="submit" class="start-btn">Start</button>
+  </form>
+  {{end}}
+
+  {{end}}
+</body>
+</html>
